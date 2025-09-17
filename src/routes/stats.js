@@ -52,7 +52,11 @@ router.get('/stats/org/count', async (req, res) => {
   try {
     const where = [];
     const params = {};
-    if (org) { where.push('FIND_IN_SET(:org, REPLACE(REPLACE(REPLACE(applicants_current, " ", ","), ";", ","), "、", ","))'); params.org = String(org); }
+    if (org) {
+      // 兼容多分隔符：空格/分号/顿号/竖线 → 逗号
+      where.push('FIND_IN_SET(:org, REPLACE(REPLACE(REPLACE(REPLACE(applicants_current, " ", ","), ";", ","), "、", ","), "|", ","))');
+      params.org = String(org);
+    }
     if (from) { where.push('apply_year >= :fromY'); params.fromY = Number(from); }
     if (to) { where.push('apply_year <= :toY'); params.toY = Number(to); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';

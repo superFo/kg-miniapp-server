@@ -29,7 +29,7 @@ function ipcPrefix(main) {
 
 function normalizeApplicant(a) {
   if (!a) return null;
-  return String(a).replace(/[;；、\s]+/g, ',').replace(/,+/g, ',').replace(/^,|,$/g, '');
+  return String(a).replace(/[\|;；、\s]+/g, ',').replace(/,+/g, ',').replace(/^,|,$/g, '');
 }
 
 function isGranted(legalStatus) {

@@ -6,7 +6,7 @@ export const router = Router();
 function splitToArray(text, limit = 10) {
   if (!text) return [];
   const arr = String(text)
-    .split(/[;,，；、\s]+/)
+    .split(/[\|;,，；、\s]+/)
     .map(s => s.trim())
     .filter(Boolean);
   return limit > 0 ? arr.slice(0, limit) : arr;
@@ -131,20 +131,38 @@ router.get('/graph/org_collab', async (req, res) => {
   const sampleLimit = Math.max(100, Math.min(parseInt(String(req.query.sampleLimit || '5000'), 10) || 5000, 20000));
   try {
     const { whereSql, params } = buildWhereFromQuery(req.query || {});
-    const sql = `SELECT applicants_current FROM patents ${whereSql} LIMIT :lim`;
+    const sql = `SELECT pub_no, applicants_current FROM patents ${whereSql} LIMIT :lim`;
     const [rows] = await pool.execute(sql, { ...params, lim: sampleLimit });
 
     // 累计节点与边权重
-    const nodeCount = new Map();
+    const nodeData = new Map(); // name -> { count, pubs:Set }
     const edgeCount = new Map();
+    const clean = (name) => {
+      if (!name) return '';
+      let s = String(name)
+        .replace(/[|]+/g, '')      // 去管道符
+        .replace(/[，；;、]+/g, ' ') // 标点转空格便于裁剪
+        .replace(/\s+/g, ' ')      // 压缩空白
+        .trim();
+      // 删除仅 1 个字符或仅英文一到两位的噪声，如 "I"、"A"、"-"
+      if (!s || s.length <= 1) return '';
+      if (/^[A-Za-z]{1,2}$/.test(s)) return '';
+      if (/^[._-]+$/.test(s)) return '';
+      return s;
+    };
 
     for (const r of (rows || [])) {
-      const orgs = splitToArray(r.applicants_current, 20);
+      const orgs = splitToArray(r.applicants_current, 20).map(clean).filter(Boolean);
       if (!orgs || orgs.length < 2) continue;
-      // 去重同一专利中的重复机构名
+      // 去重同一专利中的重复机构名（在清洗后）
       const uniq = Array.from(new Set(orgs));
-      // 节点计数
-      uniq.forEach(o => nodeCount.set(o, (nodeCount.get(o) || 0) + 1));
+      // 节点计数 + 收集样例公开号
+      uniq.forEach(o => {
+        if (!nodeData.has(o)) nodeData.set(o, { count: 0, pubs: new Set() });
+        const nd = nodeData.get(o);
+        nd.count += 1;
+        if (r.pub_no && nd.pubs.size < 5) nd.pubs.add(String(r.pub_no));
+      });
       // 两两组合计边
       for (let i = 0; i < uniq.length; i++) {
         for (let j = i + 1; j < uniq.length; j++) {
@@ -157,10 +175,10 @@ router.get('/graph/org_collab', async (req, res) => {
     }
 
     // 选择前 topN 节点
-    const topNodes = Array.from(nodeCount.entries())
-      .sort((a,b) => b[1]-a[1])
+    const topNodes = Array.from(nodeData.entries())
+      .sort((a,b) => b[1].count - a[1].count)
       .slice(0, topN)
-      .map(([name, cnt]) => ({ name, cnt }));
+      .map(([name, d]) => ({ name, cnt: d.count, pubs: Array.from(d.pubs) }));
     const allowed = new Set(topNodes.map(n => n.name));
 
     // 过滤边：两端均在前 topN 且权重 >= minWeight
@@ -174,7 +192,7 @@ router.get('/graph/org_collab', async (req, res) => {
     }
 
     // 构造返回
-    const nodes = topNodes.map(n => ({ id: `org:${n.name}`, label: n.name, type: 'organization', count: n.cnt }));
+    const nodes = topNodes.map(n => ({ id: `org:${n.name}`, label: n.name, type: 'organization', count: n.cnt, pubs: n.pubs }));
     const rels = edges.map(e => ({ source: `org:${e.a}`, target: `org:${e.b}`, rel: 'COLLAB_WITH', weight: e.w }));
 
     res.json({ nodes, edges: rels });
