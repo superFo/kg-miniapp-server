@@ -72,7 +72,20 @@ router.get('/search', async (req, res) => {
 
     const [listRows] = await pool.execute(selectSql, { ...params, offset, pageSize: sizeNum });
 
-    res.json({ total, list: listRows });
+    // Append thumbnail url without DB migration: map by IPC prefix/hash
+    const thumbs = [
+      'https://7072-prod-8g3u2rxd90ea9c7a-1378315181.tcb.qcloud.la/pic/junzi.png?sign=2e3a0d42225c1815ec69043d744d42c8&t=1757580086',
+      'https://7072-prod-8g3u2rxd90ea9c7a-1378315181.tcb.qcloud.la/pic/turang.png?sign=7ca489a3dd7e11c6c5c8ebe252260a2f&t=1757580115',
+      'https://7072-prod-8g3u2rxd90ea9c7a-1378315181.tcb.qcloud.la/pic/maisui.png?sign=0d0f99c4d2f8e065fbec2481f2b9a4ef&t=1757580123'
+    ];
+    const pickThumb = (row) => {
+      const key = String(row.ipc_main_prefix || row.ipc_main || row.pub_no || '').toUpperCase();
+      let sum = 0; for (let i = 0; i < key.length; i++) sum = (sum + key.charCodeAt(i)) % 997;
+      return thumbs[sum % thumbs.length];
+    };
+    const withThumbs = (listRows || []).map(r => ({ ...r, thumb_url: pickThumb(r) }));
+
+    res.json({ total, list: withThumbs });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal_error' });

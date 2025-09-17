@@ -12,6 +12,23 @@ function splitToArray(text, limit = 10) {
   return limit > 0 ? arr.slice(0, limit) : arr;
 }
 
+function buildWhereFromQuery(q) {
+  const whereClauses = [];
+  const params = {};
+  const { kw = '', yearStart = '', yearEnd = '', type = '', ipcPrefix = '', applicant = '' } = q || {};
+  if (kw && String(kw).trim()) {
+    whereClauses.push('(MATCH(title, abstract) AGAINST(:kw IN NATURAL LANGUAGE MODE) OR title LIKE CONCAT("%", :kw_like, "%") OR abstract LIKE CONCAT("%", :kw_like, "%"))');
+    params.kw = kw; params.kw_like = kw;
+  }
+  if (yearStart) { whereClauses.push('apply_year >= :ys'); params.ys = Number(yearStart); }
+  if (yearEnd) { whereClauses.push('apply_year <= :ye'); params.ye = Number(yearEnd); }
+  if (type) { whereClauses.push('(FIND_IN_SET(patent_type, :ptype) > 0)'); params.ptype = String(type); }
+  if (ipcPrefix) { whereClauses.push('ipc_main_prefix LIKE CONCAT(:ipc, "%")'); params.ipc = String(ipcPrefix); }
+  if (applicant) { whereClauses.push('applicants_current LIKE CONCAT("%", :app, "%")'); params.app = String(applicant); }
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  return { whereSql, params };
+}
+
 // GET /api/graph/neighbor?pub_no=&limit=50
 router.get('/graph/neighbor', async (req, res) => {
   const { pub_no = '', limit = '50' } = req.query;
@@ -100,6 +117,67 @@ router.get('/graph/path', async (req, res) => {
     }
     // no simple path found
     res.json({ paths: [] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// GET /api/graph/org_collab?kw=&yearStart=&yearEnd=&type=&ipcPrefix=&applicant=&topN=80&minWeight=1&sampleLimit=5000
+router.get('/graph/org_collab', async (req, res) => {
+  const pool = getPool();
+  const topN = Math.max(10, Math.min(parseInt(String(req.query.topN || '80'), 10) || 80, 300));
+  const minWeight = Math.max(1, Math.min(parseInt(String(req.query.minWeight || '1'), 10) || 1, 1000));
+  const sampleLimit = Math.max(100, Math.min(parseInt(String(req.query.sampleLimit || '5000'), 10) || 5000, 20000));
+  try {
+    const { whereSql, params } = buildWhereFromQuery(req.query || {});
+    const sql = `SELECT applicants_current FROM patents ${whereSql} LIMIT :lim`;
+    const [rows] = await pool.execute(sql, { ...params, lim: sampleLimit });
+
+    // 累计节点与边权重
+    const nodeCount = new Map();
+    const edgeCount = new Map();
+
+    for (const r of (rows || [])) {
+      const orgs = splitToArray(r.applicants_current, 20);
+      if (!orgs || orgs.length < 2) continue;
+      // 去重同一专利中的重复机构名
+      const uniq = Array.from(new Set(orgs));
+      // 节点计数
+      uniq.forEach(o => nodeCount.set(o, (nodeCount.get(o) || 0) + 1));
+      // 两两组合计边
+      for (let i = 0; i < uniq.length; i++) {
+        for (let j = i + 1; j < uniq.length; j++) {
+          const a = uniq[i]; const b = uniq[j];
+          const [s, t] = a < b ? [a, b] : [b, a];
+          const key = s + '|||'+ t;
+          edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+        }
+      }
+    }
+
+    // 选择前 topN 节点
+    const topNodes = Array.from(nodeCount.entries())
+      .sort((a,b) => b[1]-a[1])
+      .slice(0, topN)
+      .map(([name, cnt]) => ({ name, cnt }));
+    const allowed = new Set(topNodes.map(n => n.name));
+
+    // 过滤边：两端均在前 topN 且权重 >= minWeight
+    const edges = [];
+    for (const [key, w] of edgeCount.entries()) {
+      if (w < minWeight) continue;
+      const [a, b] = key.split('|||');
+      if (allowed.has(a) && allowed.has(b)) {
+        edges.push({ a, b, w });
+      }
+    }
+
+    // 构造返回
+    const nodes = topNodes.map(n => ({ id: `org:${n.name}`, label: n.name, type: 'organization', count: n.cnt }));
+    const rels = edges.map(e => ({ source: `org:${e.a}`, target: `org:${e.b}`, rel: 'COLLAB_WITH', weight: e.w }));
+
+    res.json({ nodes, edges: rels });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'internal_error' });
