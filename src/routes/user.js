@@ -168,12 +168,16 @@ function requireAdmin(req, res, next) {
     .catch(()=>res.status(500).json({ error: 'internal_error' }));
 }
 
-// GET /api/admin/users?kw=&role=&page=&pageSize=
+// GET /api/admin/users?kw=&kwMode=&role=&page=&pageSize=
 router.get('/admin/users', requireAdmin, async (req, res) => {
-  const { kw='', role='', page='1', pageSize='20' } = req.query;
+  const { kw='', kwMode='', role='', page='1', pageSize='20' } = req.query;
   const p = Math.max(parseInt(page,10)||1,1); const ps = Math.min(Math.max(parseInt(pageSize,10)||20,1),100);
   const offset = (p-1)*ps; const where=[]; const params={};
-  if (kw) { where.push('(username LIKE CONCAT("%",:kw,"%") OR email LIKE CONCAT("%",:kw,"%"))'); params.kw=kw; }
+  if (kw) {
+    if (kwMode === '仅用户名') { where.push('username LIKE CONCAT("%",:kw,"%")'); params.kw=kw; }
+    else if (kwMode === '仅邮箱') { where.push('email LIKE CONCAT("%",:kw,"%")'); params.kw=kw; }
+    else { where.push('(username LIKE CONCAT("%",:kw,"%") OR email LIKE CONCAT("%",:kw,"%"))'); params.kw=kw; }
+  }
   if (role) { where.push('role=:role'); params.role=role; }
   const whereSql = where.length?`WHERE ${where.join(' AND ')}`:'';
   try {
@@ -194,14 +198,15 @@ router.post('/admin/users', requireAdmin, async (req, res) => {
   }catch(e){ if(e && e.code==='ER_DUP_ENTRY') return res.status(409).json({ error:'username_exists' }); res.status(500).json({ error:'internal_error' }); }
 });
 
-// PATCH /api/admin/users/:id  { display_name,email,role,status }
+// PATCH /api/admin/users/:id  { display_name,email,role,status,password }
 router.patch('/admin/users/:id', requireAdmin, async (req,res)=>{
   const id = Number(req.params.id||0); if(!id) return res.status(400).json({ error:'bad_id' });
-  const { display_name, email, role, status } = req.body||{}; const fields=[]; const p={ id };
+  const { display_name, email, role, status, password } = req.body||{}; const fields=[]; const p={ id };
   if(display_name!==undefined){ fields.push('display_name=:d'); p.d=display_name; }
   if(email!==undefined){ fields.push('email=:e'); p.e=email; }
   if(role!==undefined){ fields.push('role=:r'); p.r=role; }
   if(status!==undefined){ fields.push('status=:s'); p.s=Number(status); }
+  if(password!==undefined){ fields.push('password_hash=:p'); p.p = hashPassword(password); }
   if(!fields.length) return res.json({ ok:true });
   try{ const pool=getPool(); await pool.execute(`UPDATE users SET ${fields.join(', ')} WHERE id=:id`, p); res.json({ ok:true }); } catch(e){ res.status(500).json({ error:'internal_error' }); }
 });
