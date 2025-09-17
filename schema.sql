@@ -33,3 +33,34 @@ CREATE TABLE IF NOT EXISTS `patents` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+-- 用户与认证
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `username` VARCHAR(64) NOT NULL UNIQUE,
+  `password_hash` CHAR(64) NOT NULL,
+  `display_name` VARCHAR(128) NULL,
+  `email` VARCHAR(128) NULL,
+  `avatar_url` VARCHAR(255) NULL,
+  `role` ENUM('user','admin') NOT NULL DEFAULT 'user',
+  `status` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `user_sessions` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL,
+  `token` CHAR(64) NOT NULL UNIQUE,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` TIMESTAMP NULL,
+  INDEX `idx_sessions_user`(`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL,
+  `token` CHAR(64) NOT NULL UNIQUE,
+  `expires_at` TIMESTAMP NOT NULL,
+  INDEX `idx_reset_user`(`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
