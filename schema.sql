@@ -64,3 +64,34 @@ CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+-- 用户收藏与批注
+CREATE TABLE IF NOT EXISTS `user_favorites` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL,
+  `pub_no` VARCHAR(32) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_fav_user_pub` (`user_id`, `pub_no`),
+  INDEX `idx_fav_user`(`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `user_notes` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL,
+  `pub_no` VARCHAR(32) NOT NULL,
+  `content` TEXT NOT NULL,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_note_user_pub`(`user_id`, `pub_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- 导出任务
+CREATE TABLE IF NOT EXISTS `export_tasks` (
+  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL,
+  `params_json` TEXT NOT NULL,
+  `status` ENUM('pending','processing','done','failed') NOT NULL DEFAULT 'pending',
+  `file_path` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_export_user_status`(`user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
